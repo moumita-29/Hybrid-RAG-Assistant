@@ -1,19 +1,22 @@
 # Hybrid Search RAG Assistant
 
 ## Project Overview
-The Hybrid Search RAG (Retrieval-Augmented Generation) Assistant is a powerful, locally-run AI application designed to intelligently query and chat with your PDF documents. It uses a combination of semantic search (FAISS) and keyword search (BM25) merged via Reciprocal Rank Fusion, followed by a Cross-Encoder reranking step to retrieve the most highly relevant context for your questions. When the system detects low-quality retrieval, it employs a smart fallback mechanism to rely on general AI knowledge.
+The Corrective Hybrid RAG (Retrieval-Augmented Generation) Assistant is a powerful, locally-run AI application designed to intelligently query and chat with your PDF documents. It uses a combination of semantic search (FAISS) and keyword search (BM25) merged via Reciprocal Rank Fusion, followed by a Cross-Encoder reranking step to retrieve the most highly relevant context. 
+
+It is heavily upgraded with **Corrective RAG (CRAG)** principles: an LLM-based Document Grader evaluates every retrieved chunk for relevance, and an Adaptive Router handles conversational follow-ups. For multi-document comparisons, it employs a **Double Round-Robin** diversity filter to guarantee balanced, interleaving context across all uploaded PDFs.
 
 ## Features
 - **Multi-PDF Upload**: Drag and drop multiple PDF documents simultaneously.
+- **Corrective RAG (CRAG)**: A dedicated Document Grader evaluates chunks and strips irrelevant context before generation.
+- **Double Round-Robin Comparison**: Automatically detects comparison queries and ensures all uploaded PDFs have an equal, balanced representation in the prompt to prevent "lost in the middle" errors.
+- **Conversational Memory & Intent Routing**: Remembers chat history and intelligently skips retrieval for conversational follow-ups.
 - **Hybrid Search**: Combines Dense (FAISS) and Sparse (BM25) vector retrieval for superior accuracy.
 - **Cross-Encoder Reranking**: Re-evaluates search results for precise, context-aware answers.
-- **Smart Fallback Mechanism**: Automatically switches to the LLM's general knowledge if document context is irrelevant or low confidence.
 - **Source Citations**: Transparently displays exactly which document and page the AI used to formulate its response.
-- **Retrieval Inspector**: A dedicated debug tab to view exact retrieved chunks and their scores.
-- **Evaluation Dashboard**: Tracks query history, average retrieval time, and confidence metrics.
+- **Retrieval Inspector**: A robust debug dashboard to view exact retrieved chunks, cross-encoder scores, routing paths, and CRAG grading results.
 
 ## Architecture
-The application follows a standard RAG pipeline enhanced with advanced retrieval techniques. 
+The application follows an advanced Corrective RAG pipeline:
 
 ```mermaid
 graph TD
@@ -21,54 +24,40 @@ graph TD
     B --> C[(FAISS Vector Store)]
     B --> D[(BM25 Sparse Index)]
     
-    E[User Query] --> F{Hybrid Retrieval}
-    F -->|Semantic Search| C
-    F -->|Keyword Search| D
+    E[User Query] --> F{Intent Router}
+    F -->|Follow-up| O
+    F -->|New Query| H{Hybrid Retrieval}
     
-    C --> G[Dense Candidates]
-    D --> H[Sparse Candidates]
+    H -->|Semantic Search| C
+    H -->|Keyword Search| D
     
-    G --> I(Reciprocal Rank Fusion - RRF)
-    H --> I
+    C --> I(Reciprocal Rank Fusion - RRF)
+    D --> I
     
-    I --> J[Fused Candidates]
-    J --> K(Cross-Encoder Reranker)
+    I --> J{Is Comparison Query?}
+    J -- Yes --> K[Pre-Rerank Round Robin]
+    J -- No --> L[Top N Candidates]
     
-    K --> Q[Document Grader]
-    Q --> R[Knowledge Refinement]
+    K --> M(Cross-Encoder Reranker)
+    L --> M
     
-    R --> L{Confidence Score Check}
+    M --> N[CRAG Document Grader]
+    N --> P{Context Quality Check}
     
-    L -- Low Score --> S[Query Rewrite]
-    S --> T[Second Retrieval]
-    T --> L
+    P -- High Quality --> O[Llama-3.3-70b via Groq]
+    P -- Low Quality --> Q[Query Rewrite & Retry]
     
-    L -- High Score --> N[Context Injected into Prompt]
-    L -- Repeated Failure --> M[Fallback: General Knowledge]
-    
-    M --> O[Qwen2.5 LLM]
-    N --> O
-    
-    O --> U{Answer Verification}
-    U -- FAIL --> O
-    U -- PASS --> P[Streamed Response to User]
+    O --> R[Streamed Response with Citations]
 ```
 
-1. **Document Processing**: PDFs are loaded, split into overlapping chunks, and vectorized.
-2. **Hybrid Retrieval**:
-   - FAISS retrieves chunks based on semantic similarity.
-   - BM25 retrieves chunks based on exact keyword matches.
-3. **Fusion & Reranking**: Results are merged using Reciprocal Rank Fusion (RRF) and scored by a Cross-Encoder model.
-4. **Generation**: The highest-scoring chunks are injected into a prompt for the Hugging Face LLM (Qwen2.5) to stream a response. If scores are too low, the pipeline falls back to a general knowledge query.
-
 ## Tech Stack
-- **Frontend / Framework**: [Streamlit](https://streamlit.io/)
-- **LLM**: Qwen2.5-7B-Instruct (via Hugging Face Inference API)
+- **Frontend**: [Streamlit](https://streamlit.io/)
+- **LLM Engine**: Groq API (`llama-3.3-70b-versatile`)
 - **Embeddings**: sentence-transformers (`all-MiniLM-L6-v2`)
 - **Reranker**: sentence-transformers (`cross-encoder/ms-marco-MiniLM-L-6-v2`)
 - **Vector Database**: FAISS
 - **Keyword Search**: rank_bm25
-- **Document Loading & Chunking**: LangChain (`PyPDFLoader`, `RecursiveCharacterTextSplitter`)
+- **Document Framework**: LangChain (`PyPDFLoader`, `RecursiveCharacterTextSplitter`)
 
 ## Installation
 
@@ -89,9 +78,9 @@ graph TD
    ```
 
 4. **Configure your environment**:
-   Create a `.env` file in the root directory and add your Hugging Face token:
+   Create a `.env` file in the root directory and add your Groq API key:
    ```env
-   HF_TOKEN=your_huggingface_token_here
+   GROQ_API_KEY=your_groq_api_key_here
    ```
 
 ## How to Run
